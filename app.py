@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, send_file
 import google.generativeai as genai
 from gtts import gTTS
 import os
+import io
 import uuid
 
 app = Flask(__name__)
@@ -22,55 +23,43 @@ def processar_duvida():
     audio_file = request.files.get('audio')
     imagem_file = request.files.get('imagem')
     
-    # Prompt focado em acessibilidade
-    prompt = "Aja como um técnico agrícola amigo e experiente. Responda de forma curta e simples em português, para um agricultor que não sabe ler. Analise a foto ou o áudio e dê uma solução prática."
+    prompt = "Você é um agrônomo amigo. Responda de forma curta e simples em português para um agricultor. Ajude com o que ver na foto ou ouvir no áudio."
     conteudos = [prompt]
 
-    temp_paths = []
-
     try:
-        # Processar Imagem
-        if imagem_file and imagem_file.filename != '':
-            img_path = f"img_{uuid.uuid4().hex}.jpg"
-            imagem_file.save(img_path)
-            temp_paths.append(img_path)
-            img_upload = genai.upload_file(img_path)
-            conteudos.append(img_upload)
+        # Processa Imagem
+        if imagem_file:
+            img_bytes = imagem_file.read()
+            if len(img_bytes) > 0:
+                conteudos.append({'mime_type': 'image/jpeg', 'data': img_bytes})
 
-        # Processar Áudio
-        if audio_file and audio_file.filename != '':
-            audio_path = f"aud_{uuid.uuid4().hex}.webm"
-            audio_file.save(audio_path)
-            temp_paths.append(audio_path)
-            audio_upload = genai.upload_file(audio_path)
-            conteudos.append(audio_upload)
+        # Processa Áudio
+        if audio_file:
+            aud_bytes = audio_file.read()
+            if len(aud_bytes) > 0:
+                conteudos.append({'mime_type': 'audio/webm', 'data': aud_bytes})
 
+        # Se nada foi enviado
         if len(conteudos) == 1:
-            texto_resposta = "Olá! Por favor, tente enviar a foto ou o áudio novamente para eu poder ajudar."
+            texto_resposta = "Não recebi sua foto ou áudio. Tente novamente, por favor."
         else:
-            # Gerar conteúdo
+            # Chama a IA
             response = model.generate_content(conteudos)
             texto_resposta = response.text
 
     except Exception as e:
-        print(f"ERRO TÉCNICO: {e}")
-        texto_resposta = "Peço desculpa, tive um pequeno problema no sistema. Pode tentar falar de novo agora?"
+        print(f"Erro: {e}")
+        texto_resposta = "Tive um problema para entender. Pode repetir?"
 
-    # Gerar Voz
+    # Gera a Voz da Resposta
     try:
         tts = gTTS(text=texto_resposta, lang='pt', tld='com.br')
-        res_path = f"res_{uuid.uuid4().hex}.mp3"
-        tts.save(res_path)
-        temp_paths.append(res_path)
-        return send_file(res_path, mimetype="audio/mpeg")
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        return send_file(fp, mimetype="audio/mpeg")
     except:
-        return "Erro ao gerar áudio", 500
-    finally:
-        # Limpeza de ficheiros temporários para não travar o Render
-        for p in temp_paths:
-            if os.path.exists(p) and "res_" not in p: # Mantém a resposta para envio
-                try: os.remove(p)
-                except: pass
+        return "Erro no áudio", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
