@@ -22,38 +22,55 @@ def processar_duvida():
     audio_file = request.files.get('audio')
     imagem_file = request.files.get('imagem')
     
-    # Instruções simplificadas para a IA
-    prompt = "Aja como um técnico agrícola amigo. Responda em português simples, para quem não sabe ler. Seja direto e ajude com a foto ou áudio enviado."
+    # Prompt focado em acessibilidade
+    prompt = "Aja como um técnico agrícola amigo e experiente. Responda de forma curta e simples em português, para um agricultor que não sabe ler. Analise a foto ou o áudio e dê uma solução prática."
     conteudos = [prompt]
 
-    try:
-        if imagem_file:
-            # Salva temporariamente para enviar à IA
-            img_path = f"{uuid.uuid4().hex}.jpg"
-            imagem_file.save(img_path)
-            img_data = genai.upload_file(img_path)
-            conteudos.append(img_data)
-        
-        if audio_file:
-            audio_path = f"{uuid.uuid4().hex}.webm"
-            audio_file.save(audio_path)
-            audio_data = genai.upload_file(audio_path)
-            conteudos.append(audio_data)
+    temp_paths = []
 
-        # Gera a resposta
-        resposta = model.generate_content(conteudos)
-        texto_resposta = resposta.text
+    try:
+        # Processar Imagem
+        if imagem_file and imagem_file.filename != '':
+            img_path = f"img_{uuid.uuid4().hex}.jpg"
+            imagem_file.save(img_path)
+            temp_paths.append(img_path)
+            img_upload = genai.upload_file(img_path)
+            conteudos.append(img_upload)
+
+        # Processar Áudio
+        if audio_file and audio_file.filename != '':
+            audio_path = f"aud_{uuid.uuid4().hex}.webm"
+            audio_file.save(audio_path)
+            temp_paths.append(audio_path)
+            audio_upload = genai.upload_file(audio_path)
+            conteudos.append(audio_upload)
+
+        if len(conteudos) == 1:
+            texto_resposta = "Olá! Por favor, tente enviar a foto ou o áudio novamente para eu poder ajudar."
+        else:
+            # Gerar conteúdo
+            response = model.generate_content(conteudos)
+            texto_resposta = response.text
 
     except Exception as e:
-        print(f"Erro: {e}")
-        texto_resposta = "Não consegui entender bem. Pode tentar falar de novo ou tirar outra foto?"
+        print(f"ERRO TÉCNICO: {e}")
+        texto_resposta = "Peço desculpa, tive um pequeno problema no sistema. Pode tentar falar de novo agora?"
 
-    # Transforma em áudio (Voz)
-    tts = gTTS(text=texto_resposta, lang='pt', tld='com.br')
-    res_path = f"res_{uuid.uuid4().hex}.mp3"
-    tts.save(res_path)
-    
-    return send_file(res_path, mimetype="audio/mpeg")
+    # Gerar Voz
+    try:
+        tts = gTTS(text=texto_resposta, lang='pt', tld='com.br')
+        res_path = f"res_{uuid.uuid4().hex}.mp3"
+        tts.save(res_path)
+        temp_paths.append(res_path)
+        return send_file(res_path, mimetype="audio/mpeg")
+    except:
+        return "Erro ao gerar áudio", 500
+    finally:
+        # Limpeza de ficheiros temporários para não travar o Render
+        for p in temp_paths:
+            if os.path.exists(p) and "res_" not in p: # Mantém a resposta para envio
+                try: os.remove(p)
+                except: pass
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
