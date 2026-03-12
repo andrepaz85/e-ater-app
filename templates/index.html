@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>e-ATER Agroecologia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Desabilita o zoom e seleções acidentais no celular ao segurar o botão */
+        body { user-select: none; -webkit-user-select: none; touch-action: manipulation; background-color: #f0fdf4; }
+        .botao-gigante { transition: transform 0.1s, filter 0.2s; }
+        .botao-gigante:active { transform: scale(0.95); filter: brightness(0.9); }
+        .gravando { animation: piscar 1s infinite; background-color: #ef4444 !important; }
+        @keyframes piscar { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-xl p-6 flex flex-col items-center text-center border-t-4 border-green-700">
+        <h1 class="text-3xl font-bold text-green-800 mb-2">🌿 e-ATER</h1>
+        <p class="text-gray-600 mb-8 font-medium">Seu Especialista Digital</p>
+
+        <label for="input-camera" class="botao-gigante w-full bg-green-600 text-white rounded-2xl py-8 mb-6 shadow-lg flex flex-col items-center justify-center cursor-pointer">
+            <i class="fas fa-camera text-5xl mb-3"></i>
+            <span class="text-xl font-bold" id="texto-foto">1. TIRAR FOTO</span>
+            <input type="file" id="input-camera" accept="image/*" capture="environment" class="hidden" onchange="fotoTirada()">
+        </label>
+
+        <button id="btn-gravar" class="botao-gigante w-full bg-yellow-500 text-white rounded-2xl py-8 shadow-lg flex flex-col items-center justify-center">
+            <i class="fas fa-microphone text-5xl mb-3" id="icone-mic"></i>
+            <span class="text-xl font-bold" id="texto-mic">2. SEGURE PARA FALAR</span>
+        </button>
+
+        <p id="status" class="mt-6 text-green-700 font-bold hidden"><i class="fas fa-spinner fa-spin"></i> O especialista está pensando...</p>
+        
+        <audio id="player-resposta" class="hidden" controls></audio>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let arquivoFoto = null;
+
+        const btnGravar = document.getElementById('btn-gravar');
+        const statusTexto = document.getElementById('status');
+        const textoMic = document.getElementById('texto-mic');
+        const playerResposta = document.getElementById('player-resposta');
+        const inputCamera = document.getElementById('input-camera');
+        const textoFoto = document.getElementById('texto-foto');
+
+        // Quando o usuário tira a foto
+        function fotoTirada() {
+            if (inputCamera.files.length > 0) {
+                arquivoFoto = inputCamera.files[0];
+                textoFoto.innerText = "FOTO PRONTA! 📸";
+                document.querySelector('label[for="input-camera"]').classList.replace('bg-green-600', 'bg-green-800');
+            }
+        }
+
+        // Prepara o microfone assim que a página carrega
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(stream => {
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = e => {
+                    audioChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    enviarParaServidor(audioBlob);
+                    audioChunks = []; // Limpa para a próxima vez
+                };
+            })
+            .catch(err => alert("Por favor, libere o microfone para funcionar."));
+
+        // Lógica de "Segurar para Gravar" (Funciona no Touch do celular e Mouse no PC)
+        function iniciarGravacao(e) {
+            e.preventDefault(); // Evita comportamentos estranhos no celular
+            if (mediaRecorder && mediaRecorder.state === "inactive") {
+                mediaRecorder.start();
+                btnGravar.classList.add('gravando');
+                textoMic.innerText = "GRAVANDO... SOLTE PARA ENVIAR";
+            }
+        }
+
+        function pararGravacao(e) {
+            e.preventDefault();
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+                btnGravar.classList.remove('gravando');
+                textoMic.innerText = "ENVIANDO...";
+                btnGravar.disabled = true;
+            }
+        }
+
+        // Eventos para Celular (Touch)
+        btnGravar.addEventListener('touchstart', iniciarGravacao);
+        btnGravar.addEventListener('touchend', pararGravacao);
+        // Eventos para Computador (Mouse)
+        btnGravar.addEventListener('mousedown', iniciarGravacao);
+        btnGravar.addEventListener('mouseup', pararGravacao);
+
+        // Envia tudo para o nosso Python/Render
+        async function enviarParaServidor(audioBlob) {
+            statusTexto.classList.remove('hidden');
+            
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'gravacao.webm');
+            if (arquivoFoto) {
+                formData.append('imagem', arquivoFoto, 'foto.jpg');
+            }
+
+            try {
+                const resposta = await fetch('/enviar-duvida', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (resposta.ok) {
+                    const audioRespostaBlob = await resposta.blob();
+                    const audioUrl = URL.createObjectURL(audioRespostaBlob);
+                    playerResposta.src = audioUrl;
+                    playerResposta.play(); // Toca a voz da IA automaticamente!
+                    
+                    // Reseta os botões
+                    textoMic.innerText = "2. SEGURE PARA FALAR";
+                    textoFoto.innerText = "1. TIRAR FOTO";
+                    document.querySelector('label[for="input-camera"]').classList.replace('bg-green-800', 'bg-green-600');
+                    arquivoFoto = null;
+                    inputCamera.value = "";
+                } else {
+                    alert("Ops, falha na conexão com o especialista.");
+                }
+            } catch (error) {
+                alert("Erro ao enviar. Verifique a internet.");
+            } finally {
+                statusTexto.classList.add('hidden');
+                btnGravar.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
